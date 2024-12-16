@@ -1,0 +1,90 @@
+pipeline {
+    agent any
+    
+    environment {
+        PATH = "/usr/local/bin:${env.PATH}" // Ensure the path to doctl is included
+    }
+    
+    tools {
+        nodejs 'NodeJS 18'
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                // Checkout the repository
+                git branch: 'main', url: 'https://github.com/irshadpp/managex.git'
+            }
+        }
+        stage('Build') {
+            steps {
+                // Navigate to each service directory and run build and tests
+                script {
+                    def services = ['users', 'employee', 'project', 'chat', 'meet', 'subscription', 'client']
+                    for (service in services) {
+                        dir(service) {
+                            sh 'npm install'
+                        }
+                    }
+                }
+            }
+        }
+        stage('Build Docker Images') {
+            steps {
+                // Build Docker images for each service
+                script {
+                    def services = ['users', 'employee', 'project', 'chat', 'meet', 'subscription', 'client']
+                    for (service in services) {
+                        dir(service) {
+                            sh "docker build -t irshadpp/${service}:latest ."
+                        }
+                    }
+                }
+            }
+        }
+        stage('Docker Login') {
+            steps {
+                script {
+                    // Login to Docker Hub
+                    withCredentials([usernamePassword(credentialsId: 'dockerhub-creds', usernameVariable: 'DOCKER_USERNAME', passwordVariable: 'DOCKER_PASSWORD')]) {
+                        sh "echo $DOCKER_PASSWORD | docker login -u $DOCKER_USERNAME --password-stdin"
+                    }
+                }
+            }
+        }
+        // stage('Deploy to Kubernetes staging') {
+        //     steps {
+        //         script {
+        //             // Use kubeconfig for Kubernetes deployment
+        //             withCredentials([string(credentialsId: 'DO_ACCESS_TOKEN', variable: 'DO_TOKEN')]) {
+        //                  sh "doctl auth init -t ${DO_TOKEN}"
+        //                  sh 'doctl kubernetes cluster kubeconfig save k8s-1-31-1-do-3-blr1-1729340695231'
+        //                  sh 'skaffold run -p staging --default-repo irshadpp'
+        //             }
+        //         }
+        //     }
+        // }
+        // stage('Approval for Production Deployment') {
+        //     steps {
+        //         input message: 'Approve to deploy to Production?', ok: 'Deploy'
+        //     }
+        // }
+        stage('Deploy to Kubernetes Production') {
+            steps {
+                script {
+                    withCredentials([string(credentialsId: 'DO_ACCESS_TOKEN', variable: 'DO_TOKEN')]) {
+                         sh "doctl auth init -t ${DO_TOKEN}"
+                         sh 'doctl kubernetes cluster kubeconfig save k8s-1-31-1-do-3-blr1-1729340695231'
+                         sh 'skaffold run -p production --default-repo irshadpp'
+                    }
+                }
+            }
+        }
+    }
+    post {
+        always {
+            // Cleanup or notify
+            echo 'Pipeline finished!'
+        }
+    }
+}
